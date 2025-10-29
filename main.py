@@ -12,7 +12,6 @@ except ImportError:
 
 # Leitura de grafo DOT simples
 
-
 def read_dot_file(path): 
   """
   Lê um grafo no formato DOT simples (sem atributos).
@@ -138,27 +137,34 @@ def floyd_warshall(vertices, edges):
 # Visualização com Graphviz
 
 def generate_graph(is_directed, edges, output_path="graph.png"):
-    if graphviz is None:
-        print("Graphviz not available. Install with 'pip install graphviz' and verify if Graphviz is in PATH.")
-        return
+  if graphviz is None:
+    print("Graphviz not available. Install with 'pip install graphviz' and verify if Graphviz is in PATH.")
+    return
+  dot = graphviz.Digraph() if is_directed else graphviz.Graph()
 
-    dot = graphviz.Digraph(comment="Grafo") if is_directed else graphviz.Graph(comment="Grafo")
-    for u, v, w in edges:
-        dot.edge(u, v, label=str(w))
-    dot.render(filename=output_path, format='png', cleanup=True)
-    print(f"Grafo gerado: {output_path}.png")
+  added = set()
+  for u, v, w in edges:
+    if not is_directed:
+      # evita duplicar a aresta (a,b) e (b,a)
+      if (v, u) in added:
+        continue
+    dot.edge(u, v, label=str(w))
+    added.add((u, v))
+
+  dot.render(filename=output_path, format='png', cleanup=True)
+  print(f"Grafo gerado: {output_path}.png")
 
 
 def visualize_mst(mst_edges, name="mst_tree"):
-    if graphviz is None:
-        print("Graphviz not available. Install with 'pip install graphviz'.")
-        return
+  if graphviz is None:
+    print("Graphviz not available. Install with 'pip install graphviz'.")
+    return
 
-    dot = graphviz.Graph(comment="Árvore Geradora Mínima")
-    for u, v, w in mst_edges:
-        dot.edge(u, v, label=str(w))
-    dot.render(filename=name, format='png', cleanup=True)
-    print(f"Árvore Geradora Mínima gerada: {name}.png")
+  dot = graphviz.Graph(comment="Árvore Geradora Mínima")
+  for u, v, w in mst_edges:
+    dot.edge(u, v, label=str(w))
+  dot.render(filename=name, format='png', cleanup=True)
+  print(f"Árvore Geradora Mínima gerada: {name}.png")
 
 
 def visualize_bellman_paths(edges, parent, source, name="bellman_paths"):
@@ -177,7 +183,7 @@ def visualize_bellman_paths(edges, parent, source, name="bellman_paths"):
   print(f"Caminhos Bellman-Ford gerados: {name}.png")
 
 
-def reconstruct_path(u, v, vertices, pos, next_node):
+def reconstruct_path(u, v, pos, next_node):
   """Reconstrói o caminho mínimo entre u e v a partir da matriz next_node."""
   if next_node[pos[u]][pos[v]] is None:
     return []
@@ -204,7 +210,7 @@ def visualize_floyd_paths_per_source(vertices, edges, dist, pos, next_node, name
     for j, target in enumerate(vertices):
       if source == target or dist[i][j] == math.inf:
         continue
-      path = reconstruct_path(source, target, vertices, pos, next_node)
+      path = reconstruct_path(source, target, pos, next_node)
       for k in range(len(path) - 1):
         used_edges.add((path[k], path[k + 1]))
 
