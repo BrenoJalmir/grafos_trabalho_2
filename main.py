@@ -167,20 +167,32 @@ def visualize_mst(mst_edges, name="mst_tree"):
   print(f"Árvore Geradora Mínima gerada: {name}.png")
 
 
-def visualize_bellman_paths(edges, parent, source, name="bellman_paths"):
-  if graphviz is None:
-    return
-  dot = graphviz.Digraph(comment="Caminhos Bellman-Ford")
-  used = set()
-  for v, p in parent.items():
-    if p is not None:
-      used.add((p, v))
-  for u, v, w in edges:
-    color = "red" if (u, v) in used else "gray"
-    penwidth = "2" if (u, v) in used else "1"
-    dot.edge(u, v, label=str(w), color=color, penwidth=penwidth)
-  dot.render(filename=name, format='png', cleanup=True)
-  print(f"Caminhos Bellman-Ford gerados: {name}.png")
+def visualize_bellman_paths(edges, parent, source, is_directed, name="bellman_paths"):
+    if graphviz is None:
+        return
+
+    dot = graphviz.Digraph(comment="Caminhos Bellman-Ford") if is_directed else graphviz.Graph(comment="Caminhos Bellman-Ford")
+
+    # Arestas usadas nos caminhos mínimos
+    used = set()
+    for v, p in parent.items():
+        if p is not None:
+            used.add((p, v) if is_directed else tuple(sorted((p, v))))
+
+    added = set()
+    for u, v, w in edges:
+        key = (u, v) if is_directed else tuple(sorted((u, v)))
+        if not is_directed and key in added:
+            continue
+        added.add(key)
+
+        color = "red" if key in used else "gray"
+        penwidth = "2" if key in used else "1"
+        dot.edge(u, v, label=str(w), color=color, penwidth=penwidth)
+
+    dot.node(source, color="red", style="filled", fillcolor="#ffcccc")
+    dot.render(filename=name, format="png", cleanup=True)
+    print(f"Caminhos Bellman-Ford gerados: {name}.png")
 
 
 def reconstruct_path(u, v, pos, next_node):
@@ -194,38 +206,42 @@ def reconstruct_path(u, v, pos, next_node):
   return path
 
 
-def visualize_floyd_paths_per_source(vertices, edges, dist, pos, next_node, name_prefix="floyd_paths"):
-  """
-  Gera uma imagem por vértice de origem, destacando os caminhos mínimos
-  a partir desse vértice com base nas matrizes de Floyd-Warshall.
-  """
-  if graphviz is None:
-    print("Graphviz not available. Install with 'pip install graphviz'.")
-    return
+def visualize_floyd_paths_per_source(vertices, edges, dist, pos, next_node, is_directed, name_prefix="floyd_paths"):
+    if graphviz is None:
+        return
 
-  for i, source in enumerate(vertices):
-    used_edges = set()
+    for i, source in enumerate(vertices):
+        used_edges = set()
 
-    # Reconstroi todos os caminhos que saem do vértice 'source'
-    for j, target in enumerate(vertices):
-      if source == target or dist[i][j] == math.inf:
-        continue
-      path = reconstruct_path(source, target, pos, next_node)
-      for k in range(len(path) - 1):
-        used_edges.add((path[k], path[k + 1]))
+        # Constrói conjunto de arestas que fazem parte de algum caminho mínimo
+        for j, target in enumerate(vertices):
+            if source == target or dist[i][j] == math.inf:
+                continue
+            path = reconstruct_path(source, target, pos, next_node)
+            for k in range(len(path) - 1):
+                if is_directed:
+                    used_edges.add((path[k], path[k + 1]))
+                else:
+                    used_edges.add(tuple(sorted((path[k], path[k + 1]))))
 
-    # Cria um gráfico para essa origem
-    dot = graphviz.Digraph(comment=f"Caminhos mínimos a partir de {source}")
-    dot.node(source, color="red", style="filled", fillcolor="#ffcccc")
-    for u, v, w in edges:
-      if (u, v) in used_edges:
-        dot.edge(u, v, label=str(w), color="green", penwidth="2")
-      else:
-        dot.edge(u, v, label=str(w), color="gray", penwidth="1")
+        dot = graphviz.Digraph(comment=f"Caminhos mínimos a partir de {source}") if is_directed else graphviz.Graph(comment=f"Caminhos mínimos a partir de {source}")
+        dot.node(source, color="red", style="filled", fillcolor="#ffcccc")
 
-    file_name = f"{name_prefix}_{source}"
-    dot.render(filename=file_name, format="png", cleanup=True)
-    print(f"Caminhos Floyd-Warshall a partir de '{source}' gerados: {file_name}.png")
+        added = set()
+        for u, v, w in edges:
+            key = (u, v) if is_directed else tuple(sorted((u, v)))
+            if not is_directed and key in added:
+                continue
+            added.add(key)
+
+            color = "green" if key in used_edges else "gray"
+            penwidth = "2" if key in used_edges else "1"
+            dot.edge(u, v, label=str(w), color=color, penwidth=penwidth)
+
+        file_name = f"{name_prefix}_{source}"
+        dot.render(filename=file_name, format="png", cleanup=True)
+        print(f"Caminhos Floyd-Warshall a partir de '{source}' gerados: {file_name}.png")
+
 
 
 # main
@@ -254,36 +270,43 @@ def main():
   # Bellman-Ford
   source = vertices[0]
   print("\n=== Algoritmo de Bellman-Ford ===")
+  parent = None
+  neg_cycle = False
   try:
     dist, parent = bellman_ford(vertices, edges, source)
     for v in vertices:
       print(f"{source} -> {v}: dist = {dist[v]}, pai = {parent[v]}")
   except ValueError as e:
     print("Erro:", e)
+    neg_cycle = True
 
   # Floyd-Warshall
-  print("\n=== Algoritmo de Floyd-Warshall ===")
-  dist, pos, next_node = floyd_warshall(vertices, edges)
-  print("Matriz de distâncias:")
-  print("    ", " ".join(vertices))
-  for i, u in enumerate(vertices):
-    row = " ".join(f"{dist[i][pos[v]] if dist[i][pos[v]] != math.inf else '∞':>5}" for v in vertices)
-    print(f"{u:>3} {row}")
+  # Caso haja um ciclo negativo, o algoritmo será terminado e não haverá retorno do bellman-ford, 
+  # e o floyd-warshall tentaria rodar mas demonstraria um comportamento errático, então ele só é rodado
+  # caso não exista ciclo negativo.
+  if not neg_cycle:
+    print("\n=== Algoritmo de Floyd-Warshall ===")
+    dist, pos, next_node = floyd_warshall(vertices, edges)
+    print("Matriz de distâncias:")
+    print("    ", " ".join(vertices))
+    for i, u in enumerate(vertices):
+      row = " ".join(f"{dist[i][pos[v]] if dist[i][pos[v]] != math.inf else '∞':>5}" for v in vertices)
+      print(f"{u:>3} {row}")
 
 
-  # Visualização
-  if plot:
-    if not os.path.exists('./output'):
-      os.mkdir('output')
-    base = os.path.splitext(os.path.basename(path))[0]
-    if not os.path.exists(f'./output/{base}'):
-      os.mkdir(f'./output/{base}')
-    os.chdir(f'./output/{base}')
-    generate_graph(is_directed, edges, output_path=base)
-    if not is_directed:
-      visualize_mst(mst_edges)
-    visualize_bellman_paths(edges, parent, source)
-    visualize_floyd_paths_per_source(vertices, edges, dist, pos, next_node)
+    # Visualização
+    if plot:
+      if not os.path.exists('./output'):
+        os.mkdir('output')
+      base = os.path.splitext(os.path.basename(path))[0]
+      if not os.path.exists(f'./output/{base}'):
+        os.mkdir(f'./output/{base}')
+      os.chdir(f'./output/{base}')
+      generate_graph(is_directed, edges, output_path=base)
+      if not is_directed:
+        visualize_mst(mst_edges)
+        visualize_bellman_paths(edges, parent, source, is_directed)
+        visualize_floyd_paths_per_source(vertices, edges, dist, pos, next_node, is_directed)
 
 if __name__ == "__main__":
   main()
